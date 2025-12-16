@@ -1,0 +1,8 @@
+datasets
+.venv
+__pycache__
+results
+documentos
+*.mp4
+*.pth
+*.pt
