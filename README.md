@@ -133,12 +133,6 @@ Deberías ver algo como: `nvcc: NVIDIA (R) Cuda compiler driver, Version 13.0`
 - De `cuDNN\lib\x64\*` → `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.0\lib\x64`
 - De `cuDNN\include\*` → `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.0\include`
 
-#### Paso 6: Actualizar PyTorch para CUDA (En tu venv activado)
-
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-```
-
 #### Paso 7: Verificar que PyTorch detecta CUDA
 
 ```python
