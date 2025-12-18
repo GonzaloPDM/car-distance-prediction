@@ -1,7 +1,4 @@
 import torch
-import torchvision
-from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
-from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 from PIL import Image
 from torchvision.transforms import functional as F
 import torch.nn.functional as F_nn
@@ -15,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def draw_predictions(image_tensor, pred_masks, pred_boxes, pred_labels):
+def draw_predictions(image_tensor, pred_masks, pred_boxes, pred_labels, masks_colors=None, custom_labels=False):
     """
         This method draw over a given image the segmentation masks and bounding boxes of given predictions
     Args:
@@ -23,6 +20,10 @@ def draw_predictions(image_tensor, pred_masks, pred_boxes, pred_labels):
         pred_masks: The segmentation masks
         pred_boxes: The bounding boxes
         pred_labels: The labels for each predicted class
+        masks_colors: The array with the color of each mask
+        custom_lables: If True, then the label within the box will be exactly as in pred_labels. 
+                       If False, then will be in format "Class: label".
+
 
     Returns:
         processed_image: the image with masks and bounding boxes drawn on it
@@ -41,18 +42,22 @@ def draw_predictions(image_tensor, pred_masks, pred_boxes, pred_labels):
 
     # Draw the masks
     if len(masks_bool) > 0:
-        processed_image = draw_segmentation_masks(image_int, masks_bool, alpha=0.6)
+        if masks_colors is not None:
+            processed_image = draw_segmentation_masks(image_int, masks_bool, alpha=0.6, colors=masks_colors)
+        else:
+            processed_image = draw_segmentation_masks(image_int, masks_bool, alpha=0.6, colors="green")
     else:
         processed_image = image_int
 
     # Draw the bounding boxes
     if len(pred_boxes) > 0:
-        labels_text = [f"Class: {label}" for label in pred_labels]
+        if not custom_labels:
+            pred_labels = [f"Class: {label}" for label in pred_labels]
         
         processed_image = draw_bounding_boxes(
             processed_image, 
             pred_boxes, 
-            labels=labels_text, 
+            labels=pred_labels, 
             colors="yellow", 
             width=3
         )
@@ -97,11 +102,40 @@ def get_predictions(image_tensor, model, score_threshold=0.5):
     pred_masks = prediction['masks'][keep_idx]
     pred_labels = prediction['labels'][keep_idx]
 
-    
     return pred_masks, pred_boxes, pred_labels
 
 
-def process_video(video_path, output_path, model, device, resize_factor=0.5, score_threshold=0.5):
+
+def segmentate_vehicles(image, model, device='cpu'):
+    # Convert the image to Tensor format
+    image_tensor = F.to_tensor(image).to(device)
+
+    pred_masks, pred_boxes, pred_labels = get_predictions(image_tensor, model, 0.5)
+    image_processed = draw_predictions(image_tensor, pred_masks, pred_boxes, pred_labels)
+
+    return image_processed
+
+
+def process_segmentation_video(video_path, output_path, model, device='cpu', score_threshold=0.5, frames_per_prediction=1):
+    """
+        This functions processes a video by calculating the model predictions and draw them on the video
+
+    Args:
+        video_path: The path to the video file
+        output_path: The path where the resulting video is written
+        model: The segmentation model that predicts masks and bouding boxes
+        device: The device where the computations will be done. CPU by default
+        score_threshold: The asurance of the model for shwoing the instance predictions 
+        frames_per_prediction: The amount of frames that passes beetwen each prediction. The smaller, the faster the process, but results will be worst. Default is 1 (every frame)
+
+    Returns:
+        true if video is correctly processed, False if an error ocurred.
+    """
+    # Control frames per second
+    if frames_per_prediction <= 0:
+        print("Frmes per predictions must be > 0\n")
+        return False
+
     cap = cv2.VideoCapture(video_path)
 
     if not cap.isOpened():
@@ -121,17 +155,20 @@ def process_video(video_path, output_path, model, device, resize_factor=0.5, sco
             ret, frame = cap.read()
             if not ret:
                 break # Video ended
-            
+
             # Convert the image to Tensor format
             frame_tensor = F.to_tensor(frame).to(device)
+            
+            # Let between model predictions as many frames as the parameter frames_per_prediction
+            if frame_count % frames_per_prediction == 0:
+                # Process the frame and write it in the ouput route
+                pred_masks, pred_boxes, pred_labels = get_predictions(frame_tensor, model, score_threshold)
 
-            # Process the frame and write it in the ouput route
-            pred_masks, pred_boxes, pred_labels = get_predictions(frame_tensor, model, score_threshold)
             frame_processed = draw_predictions(frame_tensor, pred_masks, pred_boxes, pred_labels)
             out.write(frame_processed)
             
             # Show the frame processing in real time
-            #cv2.imshow("Processed video", frame_processed)
+            cv2.imshow("Processed video", frame_processed)
             
             frame_count += 1
             if frame_count % 50 == 0:
@@ -163,14 +200,6 @@ if __name__ == "__main__":
     except FileExistsError:
         pass
 
-    print(f"Dataset: {PATH_CITYSCAPE_DATA}")
-    print(f"Models: {PATH_MODEL}")
-    print(f"Images: {PATH_IMAGES}")
-    print(f"Videos: {PATH_VIDEOS}")
-    print(f"Resulting images: {PATH_RESULT_IMAGES}")
-    print(f"Resulting videos: {PATH_RESULT_VIDEOS}")
-
-
     # Set the acceleration device (or the CPU if cuda is not available)
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
@@ -193,7 +222,9 @@ if __name__ == "__main__":
     video_path = os.path.join(PATH_VIDEOS, f"{video_name}.mp4")
     output_path = os.path.join(PATH_RESULT_VIDEOS,f"{video_name}_result.mp4")
 
-    result = process_video(video_path, output_path, model, device, score_threshold=0.7)
+    frames_per_prediction = 1
+
+    result = process_segmentation_video(video_path, output_path, model, device, score_threshold=0.7, frames_per_prediction=frames_per_prediction)
 
     if result:
         print(f"Video saved in: {output_path}")
