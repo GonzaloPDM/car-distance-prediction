@@ -1,6 +1,5 @@
 import os
 import cv2
-import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -60,8 +59,8 @@ def remove_road_perspective(image,
         This method calculate the homography of the road, given the points of a rectangle aling with straight road lines
     Args:
         img: The road image from the camera perspective
-        src_pts: The points of a rectangle align with the road lines in the image. In case its not given, it will be aproximated
-                    by a default rectangle taken from a dashboard camera.
+        src_pts: The points of a rectangle align with the road lines in the image from the perspective of the car.
+        dst_pts: The points of the src_pts rectanggle, but from a "bird eye" perspective. 
 
     Returns:
         no_perspective_image: The image with removed perspective, like seen from above
@@ -232,6 +231,8 @@ def process_lines_video(video_path, output_path,
     Args:
         video_path: The path to the video file
         output_path: The path where the resulting video is written
+        src_pts: The points of a rectangle align with the road lines in the image from the perspective of the car.
+        dst_pts: The points of the src_pts rectanggle, but from a "bird eye" perspective.
 
     Returns:
         true if video is correctly processed, False if an error ocurred.
@@ -336,12 +337,6 @@ if __name__ == '__main__':
         os.mkdir(PATH_RESULT_VIDEOS)
     except FileExistsError:
         pass
-
-    print(f"Dataset: {PATH_CITYSCAPE_DATA}")
-    print(f"Images: {PATH_IMAGES}")
-    print(f"Videos: {PATH_VIDEOS}")
-    print(f"Resulting images: {PATH_RESULT_IMAGES}")
-    print(f"Resulting videos: {PATH_RESULT_VIDEOS}")
     
     # Get the video capture
     video_name = "video1_recortado"
