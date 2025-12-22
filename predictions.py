@@ -66,25 +66,33 @@ def draw_predictions(image_tensor, pred_masks, pred_boxes, pred_labels, masks_co
     return processed_image
 
 
-def get_predictions(image_tensor, model, score_threshold=0.5):
+def get_predictions(image_tensor, model, img_h, img_w, score_threshold=0.5, max_height=0):
     """
         This method calculates the predictions of the car segmentation model of a given image,
         and returns the predictions with a confidence level above a given threshold
     Args:
         image: The image to be processed
         model: The model that computes the predictions
+        img_h, img_w: The dimensions of the image.
         score_threshold: The confidence threshold
+        max_height: The row from which the model evaluates the image. 0 means no cropping (slower), 
+                    1 means cropping whole image (no image processed). Default 0 to no cropping.
 
     Returns:
         pred_masks: The segmentation masks
         pred_boxes: The bounding boxes
         pred_labels: The labels for each predicted class
     """
+    
+    # Check that max_height is not to low (minimum computes 40% of the image)
+    if 0 < max_height < 0.6*img_h:
+        input_tensor = image_tensor[:, max_height:, :]
+    else:
+        input_tensor = image_tensor
 
     # Turn off gradient mode during the prediction execution
     with torch.no_grad():
-        # Get the predictions for that image
-        predictions = model([image_tensor])
+        predictions = model([input_tensor])
 
     prediction = predictions[0]
 
@@ -102,6 +110,13 @@ def get_predictions(image_tensor, model, score_threshold=0.5):
     pred_masks = prediction['masks'][keep_idx]
     pred_labels = prediction['labels'][keep_idx]
 
+    # Adjust coordinates if image cropped
+    if 0 < max_height < 0.6*img_h:
+        pred_boxes[:, [1, 3]] += max_height
+        full_masks = torch.zeros((len(pred_masks), 1, img_h, img_w), device=image_tensor.device)
+        full_masks[:, :, max_height:, :] = pred_masks
+        return full_masks, pred_boxes, pred_labels
+
     return pred_masks, pred_boxes, pred_labels
 
 
@@ -109,14 +124,16 @@ def get_predictions(image_tensor, model, score_threshold=0.5):
 def segmentate_vehicles(image, model, device='cpu'):
     # Convert the image to Tensor format
     image_tensor = F.to_tensor(image).to(device)
+    _, img_h, img_w = image_tensor.shape
 
-    pred_masks, pred_boxes, pred_labels = get_predictions(image_tensor, model, 0.5)
+    pred_masks, pred_boxes, pred_labels = get_predictions(image_tensor, model, img_h, img_w, 0.5)
     image_processed = draw_predictions(image_tensor, pred_masks, pred_boxes, pred_labels)
 
     return image_processed
+    
 
 
-def process_segmentation_video(video_path, output_path, model, device='cpu', score_threshold=0.5, frames_per_prediction=1):
+def process_segmentation_video(video_path, output_path, model, device='cpu', score_threshold=0.5, frames_per_prediction=1, show=False):
     """
         This functions processes a video by calculating the model predictions and draw them on the video
 
@@ -127,6 +144,7 @@ def process_segmentation_video(video_path, output_path, model, device='cpu', sco
         device: The device where the computations will be done. CPU by default
         score_threshold: The asurance of the model for shwoing the instance predictions 
         frames_per_prediction: The amount of frames that passes beetwen each prediction. The smaller, the faster the process, but results will be worst. Default is 1 (every frame)
+        show: If True, then the video is displayed while computing.
 
     Returns:
         true if video is correctly processed, False if an error ocurred.
@@ -142,15 +160,19 @@ def process_segmentation_video(video_path, output_path, model, device='cpu', sco
         return False
     else:
         # Create Writer with same properties that the original video
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        img_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        img_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = cap.get(cv2.CAP_PROP_FPS)
         fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        out = cv2.VideoWriter(output_path, fourcc, fps, (img_w, img_h))
         
-        print(f"Processing video... Resolution: {width}x{height}, FPS: {fps}")
+        print(f"Processing video... Resolution: {img_w}x{img_h}, FPS: {fps}")
         
         frame_count = 0
+
+        prev_max_height = 0     # First process the whole image
+        RESET_MAX_HEIGHT = 25   # Each 25 frames, model predicts the whole image
+
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
@@ -161,14 +183,28 @@ def process_segmentation_video(video_path, output_path, model, device='cpu', sco
             
             # Let between model predictions as many frames as the parameter frames_per_prediction
             if frame_count % frames_per_prediction == 0:
+
                 # Process the frame and write it in the ouput route
-                pred_masks, pred_boxes, pred_labels = get_predictions(frame_tensor, model, score_threshold)
+                pred_masks, pred_boxes, pred_labels = get_predictions(frame_tensor, model, 
+                                                                      img_h, img_w, 
+                                                                      score_threshold,
+                                                                      prev_max_height
+                                                                      )
+                
+                # Update the maximum height reached by any bounding box
+                if len(pred_boxes) > 0:
+                    prev_max_height = int(torch.min(pred_boxes[:, 1]).item()) - int(img_h*0.1)   # margin of 10% above the maximum bounding box height
+
+                # Each certain amount of frames, processes the whole image
+                if frame_count % RESET_MAX_HEIGHT == 0:
+                    prev_max_height = 0
 
             frame_processed = draw_predictions(frame_tensor, pred_masks, pred_boxes, pred_labels)
             out.write(frame_processed)
             
             # Show the frame processing in real time
-            cv2.imshow("Processed video", frame_processed)
+            if show:
+                cv2.imshow("Processed video", frame_processed)
             
             frame_count += 1
             if frame_count % 50 == 0:
@@ -178,7 +214,7 @@ def process_segmentation_video(video_path, output_path, model, device='cpu', sco
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
-        # Liberar recursos
+        # Free resources
         cap.release()
         out.release()
         cv2.destroyAllWindows()
@@ -224,7 +260,7 @@ if __name__ == "__main__":
 
     frames_per_prediction = 1
 
-    result = process_segmentation_video(video_path, output_path, model, device, score_threshold=0.7, frames_per_prediction=frames_per_prediction)
+    result = process_segmentation_video(video_path, output_path, model, device, score_threshold=0.7, frames_per_prediction=frames_per_prediction, show=False)
 
     if result:
         print(f"Video saved in: {output_path}")

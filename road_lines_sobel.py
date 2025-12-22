@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 
 
-def road_line_filter_image(image, saturation_thresh=(170, 255), sobelx_thresh=(20, 100)):
+def road_line_filter_image(image, saturation_thresh=(170, 255), sobelx_thresh=(20, 100), debug_image=False):
     """ Filter the road lines in the image using color and gradient thresholds.
     
         Args:
@@ -38,15 +38,12 @@ def road_line_filter_image(image, saturation_thresh=(170, 255), sobelx_thresh=(2
     sobelx_mask[(scaled_sobel >= sobelx_thresh[0]) & (scaled_sobel <= sobelx_thresh[1])] = 1
     
     # Create final mask
-    color_binary = np.dstack((np.zeros_like(sobelx_mask), sobelx_mask, (yellow_mask==1) | (white_mask==1))) * 255
+    color_binary = None
+    if debug_image:
+        color_binary = np.dstack((np.zeros_like(sobelx_mask), sobelx_mask, (yellow_mask==1) | (white_mask==1))) * 255
     
     combined_binary = np.zeros_like(sobelx_mask)
     combined_binary[(yellow_mask == 1) | (white_mask == 1) | (sobelx_mask == 1)] = 1
-
-    # Eliminate car hood from image
-    #h, _ = combined_binary.shape
-    #hood_height = int(h * 0.05) # Around 5% of bottom pixels belongs to the hood
-    #combined_binary[h-hood_height:h, :] = 0
     
     return combined_binary, color_binary
 
@@ -74,12 +71,13 @@ def remove_road_perspective(image,
 
 
 
-def calculate_road_lines(binary_warped, draw_points=False, draw_windows=False, ):
+def calculate_road_lines(binary_warped, debug_image=False):
     """ Calculate the road lines in a edges image with non perspective transformation applied, using sliding windows and polynomial fitting. 
         Then, draw the windows and the lines in an output image.
     
         Args:
             binary_warped: The binary image with the road lines in white
+            debug_image: If True, then the debug image is processed and return as out_img
         Returns:
             left_fit: The polynomial coefficients for the left road line
             right_fit: The polynomial coefficients for the right road line
@@ -111,8 +109,7 @@ def calculate_road_lines(binary_warped, draw_points=False, draw_windows=False, )
     right_lane_inds = []
 
     out_img = None
-
-    if draw_windows:
+    if debug_image:
         # Create an output image to draw on and visualize the result
         out_img = np.dstack((binary_warped, binary_warped, binary_warped))*255
 
@@ -152,17 +149,13 @@ def calculate_road_lines(binary_warped, draw_points=False, draw_windows=False, )
         right_box_left_edge = new_right_current - margin
         buffer = 10 
         
-        # If no colision, we let the means
+        # If no colision, we let the means, if not, do not renew them
         if right_box_left_edge > (left_box_right_edge + buffer):
             
             left_current = new_left_current
             right_current = new_right_current
 
-        # Else, we dont renew them
-        else:
-            pass
-
-        if draw_windows:
+        if debug_image:
             # Draw the windows on the visualization image
             cv2.rectangle(out_img,
                           (left_current - margin, win_y_high), 
@@ -180,7 +173,7 @@ def calculate_road_lines(binary_warped, draw_points=False, draw_windows=False, )
     if (len(left_lane_inds[0]) == 0) | (len(right_lane_inds[0]) == 0):
         return None, None, None
 
-    if draw_points:
+    if debug_image:
         # Draw lane pixels
         out_img[left_lane_inds[0], left_lane_inds[1]] = [255, 0, 0]
         out_img[right_lane_inds[0], right_lane_inds[1]] = [0, 0, 255]
@@ -220,6 +213,83 @@ def get_road_mask(no_perspective_image, left_fit, right_fit, Minv, h_img, img_w)
     return road_mask
 
 
+
+def search_around_poly(binary_warped, left_fit, right_fit, margin=50, debug_image=False):
+    """
+    Busca líneas de carril basándose en los polinomios del frame anterior (ROI Tracking).
+    Esto evita usar histogramas y ventanas deslizantes nuevamente.
+    """
+    # Grab activated pixels
+    nonzero = binary_warped.nonzero()
+    nonzeroy = np.array(nonzero[0])
+    nonzerox = np.array(nonzero[1])
+
+    # Define the search area around the previous polynomials
+    left_center_x = np.polyval(left_fit, nonzeroy)
+    right_center_x = np.polyval(right_fit, nonzeroy)
+
+    # Define the search area around the previous polynomials
+    left_lane_inds = ((nonzerox > (left_center_x - margin)) & 
+                      (nonzerox < (left_center_x + margin)))
+    
+    right_lane_inds = ((nonzerox > (right_center_x - margin)) & 
+                       (nonzerox < (right_center_x + margin)))
+
+    # Again, extract left and right line pixel positions
+    leftx = nonzerox[left_lane_inds]
+    lefty = nonzeroy[left_lane_inds] 
+    rightx = nonzerox[right_lane_inds]
+    righty = nonzeroy[right_lane_inds]
+
+    # If we don't find enough pixels, we assume detection failed
+    min_inds = 50
+    if len(leftx) < min_inds or len(rightx) < min_inds:
+        return None, None, None
+
+    # Fit new polynomials
+    new_left_fit = np.polyfit(lefty, leftx, 1)
+    new_right_fit = np.polyfit(righty, rightx, 1)
+    
+    # Generate x and y values for plotting
+    out_img = None
+    if debug_image:
+        # Create an output image to draw on and visualize the result
+        out_img = np.dstack((binary_warped, binary_warped, binary_warped)) * 255
+        out_img = out_img.astype(np.uint8)
+
+        # Draw green area where research have been done for each line
+        ploty = np.linspace(0, binary_warped.shape[0]-1, binary_warped.shape[0])
+        
+        # Calculate the trajectory of the PREVIOUS polynomial (where we are searching)
+        left_fitx = np.polyval(left_fit, ploty)
+        right_fitx = np.polyval(right_fit, ploty)
+
+        # Create an empty image to draw the transparency
+        window_img = np.zeros_like(out_img)
+
+        # Generate polygon points for the left margin
+        left_line_window1 = np.array([np.transpose(np.vstack([left_fitx - margin, ploty]))])
+        left_line_window2 = np.array([np.flipud(np.transpose(np.vstack([left_fitx + margin, ploty])))])
+        left_line_pts = np.hstack((left_line_window1, left_line_window2))
+        
+        # Generate polygon points for the right margin
+        right_line_window1 = np.array([np.transpose(np.vstack([right_fitx - margin, ploty]))])
+        right_line_window2 = np.array([np.flipud(np.transpose(np.vstack([right_fitx + margin, ploty])))])
+        right_line_pts = np.hstack((right_line_window1, right_line_window2))
+
+        # Draw the tunnels in green on the empty image
+        cv2.fillPoly(window_img, np.int_([left_line_pts]), (0, 255, 0))
+        cv2.fillPoly(window_img, np.int_([right_line_pts]), (0, 255, 0))
+        
+        # Blend with the original image (Transparency)
+        out_img = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
+
+        out_img[lefty, leftx] = [255, 0, 0]   # Red (or Blue in BGR)
+        out_img[righty, rightx] = [0, 0, 255] # Blue (or Red in BGR)
+
+    return new_left_fit, new_right_fit, out_img
+
+
 def process_lines_video(video_path, output_path,  
                         src_pts=None, 
                         dst_pts=None, 
@@ -233,7 +303,8 @@ def process_lines_video(video_path, output_path,
         output_path: The path where the resulting video is written
         src_pts: The points of a rectangle align with the road lines in the image from the perspective of the car.
         dst_pts: The points of the src_pts rectanggle, but from a "bird eye" perspective.
-
+        check_path: If set, then also a debug video will be processed and display to that path
+        
     Returns:
         true if video is correctly processed, False if an error ocurred.
     """
@@ -241,86 +312,125 @@ def process_lines_video(video_path, output_path,
 
     if not cap.isOpened():
         return False
-    else:
-        # Create Writer with same properties that the original video
-        img_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        img_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    # Create Writer with same properties that the original video
+    img_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    img_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
+    out = cv2.VideoWriter(output_path, fourcc, fps, (img_w, img_h))
+
+    debug = False
+    if check_path is not None:
+        debug = True
+        out_check = cv2.VideoWriter(check_path, fourcc, fps, (img_w, img_h))
+
+    if src_pts is None:
+        p1_top_left = (int(img_w * 0.45), int(img_h * 0.63)) 
+        p2_top_right = (int(img_w * 0.52), int(img_h * 0.63)) 
+        p3_bot_right = (int(img_w * 0.84), int(img_h * 0.99)) 
+        p4_bot_left  = (int(img_w * 0.28), int(img_h * 0.99)) 
+
+        src_pts = np.float32([p1_top_left, p2_top_right, p3_bot_right, p4_bot_left])
+
+    if dst_pts is None:
+        dst_pts = np.float32([(int(img_w*0.4), 0), 
+                    (int(img_w*0.6), 0), 
+                    (int(img_w*0.6), img_h), 
+                    (int(img_w*0.4), img_h)
+                ])
+
+    print(f"Processing video... Resolution: {img_w}x{img_h}, FPS: {fps}")
+    
+    # Calculate homography
+    M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+    Minv = np.linalg.inv(M)
+
+    prev_left_fit = None
+    prev_right_fit = None
+    
+    frame_count = 0
+
+    RESET_LINES_FRAMES = 25     # Reset lanes history each 25 frames
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break # Video ended
+
+        frame_processed = frame
+
+        # Filter potential line pixels
+        filter_frame, _ = road_line_filter_image(frame, sobelx_thresh=(20,100))
+
+        # Remove perspective
+        no_perspective_frame = cv2.warpPerspective(filter_frame, M, (img_w, img_h), flags=cv2.INTER_LINEAR)
+
+        # Calculate road lines
+        left_fit, right_fit = None, None
+        no_perspective_lines = None
+
+        # A) Try Optimized Search (if we have history)
+        if prev_left_fit is not None and prev_right_fit is not None:
+            left_fit, right_fit, no_perspective_lines = search_around_poly(
+                                                            no_perspective_frame, 
+                                                            prev_left_fit, 
+                                                            prev_right_fit, 
+                                                            debug_image=debug,
+                                                            margin=50
+                                                        )
         
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
-        out = cv2.VideoWriter(output_path, fourcc, fps, (img_w, img_h))
+        # B) Fallback: Full Sliding Windows Search (if optimization failed)
+        if left_fit is None and right_fit is None:
+            left_fit, right_fit, no_perspective_lines = calculate_road_lines(
+                no_perspective_frame, debug_image=debug
+            )
+            if left_fit is None and prev_left_fit is not None:
+                 left_fit, right_fit = prev_left_fit, prev_right_fit
 
-        if src_pts is None:
-            p1_top_left = (int(img_w * 0.45), int(img_h * 0.63)) 
-            p2_top_right = (int(img_w * 0.52), int(img_h * 0.63)) 
-            p3_bot_right = (int(img_w * 0.84), int(img_h * 0.99)) 
-            p4_bot_left  = (int(img_w * 0.28), int(img_h * 0.99)) 
 
-            src_pts = np.float32([p1_top_left, p2_top_right, p3_bot_right, p4_bot_left])
+        if left_fit is not None and right_fit is not None:
+            # Save for next frame
+            if frame_count % RESET_LINES_FRAMES == 0:
+                prev_left_fit = None
+                prev_right_fit = None
+            else:
+                prev_left_fit = left_fit
+                prev_right_fit = right_fit
 
-        if dst_pts is None:
-            dst_pts = np.float32([(int(img_w*0.4), 0), 
-                      (int(img_w*0.6), 0), 
-                      (int(img_w*0.6), img_h), 
-                      (int(img_w*0.4), img_h)
-                    ])
+            road_mask = get_road_mask(no_perspective_frame, left_fit, right_fit, Minv, img_h, img_w)
+            
+            # Draw the mask on the original image
+            frame_processed = cv2.addWeighted(frame, 1, road_mask, 0.3, 0)
+
+        out.write(frame_processed)
 
         if check_path is not None:
-            out_check = cv2.VideoWriter(check_path, fourcc, fps, (img_w, img_h))
-        
-        print(f"Processing video... Resolution: {img_w}x{img_h}, FPS: {fps}")
-        
-        # Calculate homography
-        M = cv2.getPerspectiveTransform(src_pts, dst_pts)
-        Minv = np.linalg.inv(M)
-        
-        frame_count = 0
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break # Video ended
-
-            frame_processed = frame
-
-            # Filter potential line pixels
-            filter_frame, _ = road_line_filter_image(frame, sobelx_thresh=(20,100))
-
-            # Remove perspective
-            no_perspective_frame = cv2.warpPerspective(filter_frame, M, (img_w, img_h), flags=cv2.INTER_LINEAR)
-
-            # Calculate road lines
-            left_fit, right_fit, no_perspective_lines = calculate_road_lines(no_perspective_frame, draw_points=True, draw_windows=True)
-
-            if left_fit is not None and right_fit is not None:
-                road_mask = get_road_mask(no_perspective_frame, left_fit, right_fit, Minv, img_h, img_w)
-                
-                # Draw the mask on the original image
-                frame_processed = cv2.addWeighted(frame, 1, road_mask, 0.3, 0)
-
-            out.write(frame_processed)
-
-            if check_path is not None:
+            if no_perspective_lines is not None:
                 out_check.write(no_perspective_lines)
-            
-            # Show the frame processing in real time
-            cv2.imshow("Processed video", frame_processed)
-            
-            frame_count += 1
-            if frame_count % 50 == 0:
-                print(f"{frame_count} frames processed...")
+            else:
+                out_check.write(np.zeros_like(frame))
+        
+        # Show the frame processing in real time
+        cv2.imshow("Processed video", frame_processed)
+        
+        frame_count += 1
+        if frame_count % 50 == 0:
+            print(f"{frame_count} frames processed...")
 
-            # Exit if press 'q'
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+        # Exit if press 'q'
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
-        if frame_count == 0:
-            print("Error, video has not been processed")
+    if frame_count == 0:
+        print("Error, video has not been processed")
 
-        # Liberar recursos
-        cap.release()
-        out.release()
-        cv2.destroyAllWindows()
-        return True
+    # Liberar recursos
+    cap.release()
+    out.release()
+    cv2.destroyAllWindows()
+    return True
     
 
 if __name__ == '__main__':

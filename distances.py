@@ -1,6 +1,8 @@
 import os
 import cv2
 import numpy as np
+import argparse
+import sys
 
 import torch
 from torchvision.transforms import functional as F_torch
@@ -19,7 +21,7 @@ VEHICLE_CONFIG = {
     6:  0.8,
     7:  0.6
 }
-FOCAL_LENGTH = 1000
+FOCAL_LENGTH = 2000
 
 
 def is_in_lane(lane_mask, box):
@@ -39,7 +41,7 @@ def get_distance_color(dist):
     if dist < 10: return (0, 0, 255) # Red
     if dist > 50: return (0, 255, 0) # Green
     
-    # Interpolación
+    # Gradient
     ratio = (dist - 10) / 40
     g = int(255 * ratio)
     r = int(255 * (1 - ratio))
@@ -47,7 +49,7 @@ def get_distance_color(dist):
 
 
 
-def draw_predictions_in_lanes(image_tensor, pred_masks, pred_boxes, pred_labels, lane_mask):
+def draw_predictions_in_lanes(image_tensor, pred_masks, pred_boxes, pred_labels, lane_mask, focal_lenght=FOCAL_LENGTH):
     """
         This method draw over a given image the segmentation masks and bounding boxes of given predictions, 
         and for those vehicles on the lane mask, calculate and represents their distance
@@ -81,7 +83,7 @@ def draw_predictions_in_lanes(image_tensor, pred_masks, pred_boxes, pred_labels,
             # Calculate distance
             pixel_w = max(1, box[2] - box[0])
             real_w = VEHICLE_CONFIG[label_id]
-            dist = (real_w * FOCAL_LENGTH) / pixel_w
+            dist = (real_w * focal_lenght) / pixel_w
             
             # Get the RGB color
             color = get_distance_color(dist) 
@@ -121,7 +123,7 @@ def predict_distance(image, M, Minv, img_h, img_w, model,
 
     # Convert the image to Tensor format
     image_tensor = F_torch.to_tensor(image).to(device)
-    masks, boxes, labels = get_predictions(image_tensor, model, score_threshold)
+    masks, boxes, labels = get_predictions(image_tensor, model, img_h, img_w, score_threshold)
 
 
     # ------------ GENERATE RESULTING FRAME --------
@@ -139,7 +141,7 @@ def predict_distance(image, M, Minv, img_h, img_w, model,
 
 
 def process_distance_video(video_path, output_path, model, device='cpu', score_threshold=0.5, 
-                           frames_per_prediction=1, src_pts=None, dst_pts=None, focal_lenght=1000, draw_lane=False, mode='sobel'):
+                           frames_per_prediction=1, src_pts=None, dst_pts=None, focal_lenght=FOCAL_LENGTH, draw_lane=False, mode='sobel'):
     """
         This function procces a video by predicting the distance of the vechiles in the same lane that the vehicle from which the secuence is recorded.
 
@@ -152,6 +154,7 @@ def process_distance_video(video_path, output_path, model, device='cpu', score_t
         frames_per_prediction: The amount of frames that passes beetwen each prediction. The smaller, the faster the process, but results will be worst. Default is 1 (every frame)
         src_pts: The points of a rectangle align with the road lines in the image from the perspective of the car.
         dst_pts: The points of the src_pts rectanggle, but from a "bird eye" perspective.
+        focal_lenght: The focal lenght of the camera that recorded the video
 
     Returns:
         true if video is correctly processed, False if an error ocurred.
@@ -194,6 +197,9 @@ def process_distance_video(video_path, output_path, model, device='cpu', score_t
         Minv = np.linalg.inv(M)
         
         frame_count = 0
+        prev_max_height = 0     # First process the whole image
+        RESET_MAX_HEIGHT = 25   # Each 25 frames, model predicts the whole image
+
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
@@ -206,15 +212,15 @@ def process_distance_video(video_path, output_path, model, device='cpu', score_t
             elif mode== 'canny':
                 filter_frame = image_edges(frame, lower_threshold=5, upper_threshold=250)
                 
-            no_persp = cv2.warpPerspective(filter_frame, M, (img_w, img_h), flags=cv2.INTER_LINEAR)
-            left_fit, right_fit, _ = calculate_road_lines(no_persp)
+            no_perspective = cv2.warpPerspective(filter_frame, M, (img_w, img_h), flags=cv2.INTER_LINEAR)
+            left_fit, right_fit, _ = calculate_road_lines(no_perspective)
 
             # Create lane mask
             lane_mask = np.zeros_like(frame)
 
             if left_fit is not None and right_fit is not None:
                 # Get the road mask
-                lane_mask = get_road_mask(no_persp, left_fit, right_fit, Minv, img_h, img_w)
+                lane_mask = get_road_mask(no_perspective, left_fit, right_fit, Minv, img_h, img_w)
 
 
             # ------------ VEHICLE SEGMENTATION MASKS ------
@@ -224,9 +230,24 @@ def process_distance_video(video_path, output_path, model, device='cpu', score_t
             
             # Let between model predictions as many frames as the parameter frames_per_prediction
             if frame_count % frames_per_prediction == 0:
-                # Process the frame and write it in the ouput route
-                masks, boxes, labels = get_predictions(frame_tensor, model, score_threshold)
 
+                # Each certain amount of frames, processes the whole image
+                if frame_count % RESET_MAX_HEIGHT == 0:
+                    prev_max_height = 0
+
+                # Process the frame and write it in the ouput route
+                masks, boxes, labels = get_predictions(frame_tensor, 
+                                                       model, 
+                                                       img_h, img_w, 
+                                                       score_threshold,
+                                                       prev_max_height
+                                                       )
+                
+                # Update the maximum height reached by any bounding box
+                if len(boxes) > 0:
+                    prev_max_height = int(torch.min(boxes[:, 1]).item()) - int(img_h*0.1)   # margin of 10% above the maximum bounding box height
+
+                
 
             # ------------ GENERATE RESULTING FRAME --------
 
@@ -239,7 +260,9 @@ def process_distance_video(video_path, output_path, model, device='cpu', score_t
                                                         masks, 
                                                         boxes, 
                                                         labels, 
-                                                        lane_mask)
+                                                        lane_mask,
+                                                        focal_lenght
+                                                        )
 
             out.write(frame_processed)
             
@@ -258,7 +281,7 @@ def process_distance_video(video_path, output_path, model, device='cpu', score_t
             print("Error, no frames have been processed")
             return False
 
-        # Liberar recursos
+        # Free resources
         cap.release()
         out.release()
         cv2.destroyAllWindows()
@@ -269,50 +292,112 @@ def process_distance_video(video_path, output_path, model, device='cpu', score_t
 
 if __name__ == '__main__':
 
+    # Define default base paths
     CWD = os.getcwd()
-    PATH_MODEL = os.path.join(CWD, "final_model/maskrcnn_cityscapes.pth")
-    PATH_IMAGES = os.path.join(CWD, "display_elements/distance_prediction/images")
-    PATH_VIDEOS = os.path.join(CWD, "display_elements/distance_prediction/videos")
-    PATH_RESULT_IMAGES = os.path.join(CWD, "results/distance_prediction/images")
-    PATH_RESULT_VIDEOS = os.path.join(CWD, "results/distance_prediction/videos")
+    DEFAULT_MODEL_PATH = os.path.join(CWD, "final_model/maskrcnn_cityscapes.pth")
+    
+    # 1. ARGUMENT PARSER CONFIGURATION
+    parser = argparse.ArgumentParser(description="ADAS Prototype: Distance Estimation & Lane Tracking")
+    
+    # Mandatory argument: Input video
+    parser.add_argument('--input', '-i', type=str, required=True, 
+                        help="Path to the input video file (e.g., videos/video1.mp4)")
+    
+    # Optional arguments
+    parser.add_argument('--output', '-o', type=str, default=None, 
+                        help="Path to save the result. If not provided, saves automatically to 'results/'")
+    
+    parser.add_argument('--model', '-m', type=str, default=DEFAULT_MODEL_PATH, 
+                        help="Path to the model weights .pth file")
+    
+    parser.add_argument('--conf', '-c', type=float, default=0.7, 
+                        help="Model confidence threshold (0.0 to 1.0). Default: 0.7")
+    
+    parser.add_argument('--hide-lane', action='store_true', 
+                        help="If set, the green lane mask will NOT be drawn")
+    
+    parser.add_argument('--mode', type=str, default='sobel', choices=['sobel', 'canny'],
+                        help="Lane detection method: 'sobel' (default) or 'canny'")
 
-    try:
-        os.mkdir(PATH_RESULT_IMAGES)
-        os.mkdir(PATH_RESULT_VIDEOS)
-    except FileExistsError:
-        pass
+    parser.add_argument('--frames-prediction', type=int, default=1, 
+                        help="Frames between predictions")
 
-    # Set the acceleration device (or the CPU if cuda is not available)
+    parser.add_argument('--focal-lenght', type=float, default=1000, 
+                        help="Camera focal length")
+    
+    parser.add_argument('--srcpts', type=float, nargs=8, 
+                        help="The four points of a trapezoid drawn over a straight lane, in a picture taken by the same camera than the video: x1 y1 x2 y2 x3 y3 x4 y4")
+    
+    # Parse arguments
+    args = parser.parse_args()
+
+    # 2. VALIDATIONS
+    if not os.path.exists(args.input):
+        print(f"Error: Input file not found: {args.input}")
+        sys.exit(1)
+
+    if not os.path.exists(args.model):
+        print(f"Error: Model not found at: {args.model}")
+        print("Please specify the correct path using --model")
+        sys.exit(1)
+
+    # 3. PREPARE DIRECTORIES
+    # If no output path is provided, generate one automatically based on input filename
+    if args.output is None:
+        filename = os.path.basename(args.input)
+        name, ext = os.path.splitext(filename)
+        
+        # Create results directory if it doesn't exist
+        results_dir = os.path.join(CWD, "results")
+        os.makedirs(results_dir, exist_ok=True)
+        
+        args.output = os.path.join(results_dir, f"{name}_result{ext}")
+
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+
+    # 4. LOAD MODEL
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    print(f"Loading model from: {args.model}")
+    print(f"Using device: {device}")
 
-    # Get the model pre-trained model
-    num_classes = 8
-    model = get_model_instance_segmentation(8)
+    # Instantiate architecture
+    num_classes = 8 
+    model = get_model_instance_segmentation(num_classes)
 
-    # Load the calculated weights in fine-tunning process
-    data_model = torch.load(PATH_MODEL, map_location=device, weights_only=False)
-    model.load_state_dict(data_model['model_state_dict'])
+    # Load weights
+    try:
+        data_model = torch.load(args.model, map_location=device, weights_only=False) # weights_only=False might be needed depending on torch version
+        model.load_state_dict(data_model['model_state_dict'])
+    except Exception as e:
+        print(f"Error loading the model: {e}")
+        sys.exit(1)
 
-    # Move the model to the acceleration device and set the model into evaluation mode
     model.to(device)
-    model.eval() 
+    model.eval()
 
-    print("Loaded model and ready to inference.")
-
-    # Get the video capture
-    video_name = "video1_3"
-    video_path = os.path.join(PATH_VIDEOS, f"{video_name}.mp4")
-
-    draw_lane=True
-    if draw_lane:
-        output_path = os.path.join(PATH_RESULT_VIDEOS,f"{video_name}_result_lane.mp4")
-    else:
-        output_path = os.path.join(PATH_RESULT_VIDEOS,f"{video_name}_result.mp4")
-
-    result = process_distance_video(video_path, output_path, model, device, score_threshold=0.7, draw_lane=draw_lane, mode='sobel')
+    # 5. EXECUTE PROCESSING
+    draw_lane_flag = not args.hide_lane # If hide-lane is True, draw is False
+    src_pts = np.float32(np.array(args.srcpts).reshape(4, 2)) if args.srcpts else None
+    
+    print(f"Processing: {args.input}")
+    print(f"Saving to: {args.output}")
+    
+    result = process_distance_video(
+        video_path=args.input, 
+        output_path=args.output, 
+        model=model, 
+        device=device, 
+        score_threshold=args.conf,
+        frames_per_prediction=args.frames_prediction,
+        src_pts=src_pts,
+        focal_lenght=args.focal_lenght,
+        draw_lane=draw_lane_flag, 
+        mode=args.mode
+    )
 
     if result:
-        print(f"Video saved in: {output_path}")
+        print(f"Video saved in: {args.output}")
     else:
         print("An error ocurred while openning the video.")
 

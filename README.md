@@ -15,35 +15,33 @@ El objetivo principal del sistema no es solo detectar vehículos, sino **calcula
 
 ## ✨ Características Principales
 
-* **🏎️ Segmentación de Instancias (Mask R-CNN):** Detección precisa de siluetas de vehículos utilizando una red neuronal convolucional (ResNet-50 FPN) pre-entrenada.
-* **🛣️ Detección de Carriles:** Algoritmo de visión clásica (procesamiento de color + detección de bordes) para identificar los límites del carril actual y generar una "zona de conducción".
-* **📏 Estimación de Distancia:** Cálculo de la distancia (en metros) hacia los vehículos detectados basándose en la geometría proyectiva y la posición del vehículo en el plano de la imagen.
-* **🎯 Filtrado Inteligente:** Lógica de asociación de datos para medir la distancia *únicamente* a los coches que interfieren en la trayectoria (dentro del polígono del carril).
-* **🚀 Optimización ROI (Smart Tracking):** Implementación de "Region of Interest" dinámica. Tras la detección inicial, el modelo restringe la búsqueda a áreas específicas para aumentar los FPS y reducir la carga de la GPU.
-
-## 📷 Demo / Resultados
-
-*(Sustituye esta línea con un GIF o imagen de tu proyecto funcionando)*
-![Demo del Proyecto](assets/demo_result.gif)
+* **🏎️ Segmentación de Instancias (Mask R-CNN):** Detección precisa de vehículos utilizando una red ResNet-50 FPN, **fine-tuneada con el dataset Cityscapes** para una mejor precisión urbana.
+* **🛣️ Detección de Carriles:** Algoritmo de visión clásica (Sobel/Canny + Sliding Windows) que genera una máscara binaria del carril actual.
+* **📏 Estimación de Distancia:** Cálculo de la distancia (en metros) utilizando el **modelo de cámara estenopeica (Pinhole Camera Model)**, basado en el ancho conocido de cada tipo de vehículo.
+* **🎯 Filtrado Inteligente (Data Association):** Lógica que cruza las máscaras de segmentación con la máscara del carril para medir la distancia *únicamente* a los vehículos relevantes.
+* **🚀 Optimización ROI (Sky Removal):** Optimización que descarta el procesamiento de la zona superior de la imagen (cielo/horizonte) para reducir la carga de la GPU y aumentar los FPS.
 
 ## 🧠 Pipeline de Procesamiento
 
 El sistema procesa cada frame del video siguiendo este flujo:
 
-1.  **Detección de Carriles (CPU):**
-    * Pre-procesamiento (Escala de grises, ROI trapezoidal).
-    * Filtrado de color (Blanco/Amarillo).
-    * Detección de líneas y cálculo del polígono del carril.
-2.  **Detección de Vehículos (GPU):**
-    * Inferencia con Mask R-CNN.
-    * Si hay detecciones previas, se aplica **ROI Tracking** para buscar solo en zonas probables.
-3.  **Fusión de Sensores (Lógica):**
-    * Se calcula el punto de contacto de cada vehículo con el suelo (bounding box `y_max`).
-    * Se verifica geométricamente (`pointPolygonTest`) si el vehículo está dentro del carril detectado.
+1.  **Detección de Carriles (Visión Clásica):**
+    * Filtrado de imagen (Sobel + Umbral de color HLS, ó Canny ).
+    * Transformación de perspectiva ("Bird-eye view").
+    * Ajuste polinómico de líneas mediante ventanas deslizantes (Sliding Windows) o búsqueda priorizada.
+2.  **Detección de Vehículos (Deep Learning):**
+    * **Static ROI:** Recorte de la zona superior de la imagen (cielo) para optimizar inferencia.
+    * Inferencia con **Mask R-CNN** sobre la región de interés.
+    * Re-mapeo de las coordenadas detectadas al frame original.
+3.  **Fusión de Sensores:**
+    * Se calcula el centroide inferior de cada vehículo detectado.
+    * **Pixel-wise Check:** Se verifica si dicho punto coincide con un píxel activo en la máscara del carril generado en el paso 1.
 4.  **Cálculo de Distancia:**
-    * Se aplica una transformación de perspectiva (basada en la altura de la cámara y el horizonte) para convertir píxeles a metros.
+    * Si el vehículo está en el carril, se aplica la fórmula $D = (W_{real} \cdot f) / W_{pixel}$.
+    * Se asigna un color dinámico (Rojo $\to$ Verde) según la proximidad.
 5.  **Visualización:**
-    * Renderizado de máscaras, cajas, carril y etiquetas de distancia sobre el frame original.
+    * Los vehículos fuera del carril se marcan en **Cyan**.
+    * Los vehículos en trayectoria muestran su distancia y alerta de color.
 
 ## 🛠️ Instalación
 
@@ -66,74 +64,25 @@ El sistema procesa cada frame del video siguiendo este flujo:
     pip install -r requirements.txt
     ```
 
-    Si vas a instalar CUDA para tu dispositivo, o ya lo tienes instalado y quieres utilizarlo, salta al siguiente paso opcional.
-    Si no, instala también las siguientes dependencias:
+    Si no tienes CUDA y no quieres instalarlo para optimizar la inferencia por GPU, instala también las siguientes dependencias:
 
     ```bash
     pip install torch torchvision
     ```
 
+    Si vas a instalar CUDA para tu dispositivo con GPU NVIDIA, o ya lo tienes instalado, debes seguir el siguiente paso opcional.
+
 ### (Opcional) Instalación de CUDA para GPU NVIDIA
 
     Para acelerar significativamente la inferencia del modelo, es recomendable instalar **CUDA Toolkit**. Sigue estos pasos:
 
-#### Paso 1: Verificar GPU NVIDIA
+1. Instala los drivers de NVIDIA.
+2. Instala [CUDA Toolkit 11.8+](https://developer.nvidia.com/cuda-downloads).
+3. Instala la versión de [PyTorch](https://pytorch.org/get-started/locally/) compatible con tu CUDA:
 
-Abre PowerShell y ejecuta:
-```bash
-nvidia-smi
-```
+#### Verificar que PyTorch detecta CUDA
 
-Si aparece la información de tu GPU, ya tienes los drivers instalados. Si no, descárgalos desde [NVIDIA Drivers](https://www.nvidia.com/Download/driverDetails.aspx).
-
-Comprueba la versión de CUDA de tu GPU, y descarga torch y torchvision desde la web oficial de [PyTorch](https://pytorch.org/get-started/locally/)
-
-Ejecutarás un comando similar a:
-```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
-```
-
-#### Paso 2: Descargar CUDA Toolkit
-
-1. Ve a [NVIDIA CUDA Toolkit](https://developer.nvidia.com/cuda-downloads)
-2. Selecciona:
-- **Operating System:** Windows
-- **Architecture:** x86_64
-- **Version:** La versión que utilizaste en el paso anterior
-- **Installer Type:** exe (local)
-3. Descarga el archivo (aproximadamente 2.5 GB)
-
-#### Paso 3: Instalar CUDA Toolkit
-
-1. Ejecuta el instalador descargado
-2. Acepta los términos de licencia
-3. Selecciona **Custom** para la instalación
-4. Asegúrate de instalar:
-- ✅ CUDA Toolkit
-- ✅ cuDNN (si está disponible)
-- ✅ NVIDIA Nsight Compute (opcional)
-5. Usa las ubicaciones de instalación por defecto (usualmente `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.0`)
-6. Completa la instalación
-
-#### Paso 4: Verificar instalación de CUDA
-
-En PowerShell, ejecuta:
-```bash
-nvcc --version
-```
-
-Deberías ver algo como: `nvcc: NVIDIA (R) Cuda compiler driver, Version 13.0`
-
-#### Paso 5: Instalar cuDNN (Opcional pero Recomendado)
-
-1. Descarga cuDNN desde [NVIDIA cuDNN](https://developer.nvidia.com/rdnn) (requiere cuenta NVIDIA)
-2. Extrae el contenido
-3. Copia los archivos a la carpeta de CUDA:
-- De `cuDNN\bin\*` → `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.0\bin`
-- De `cuDNN\lib\x64\*` → `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.0\lib\x64`
-- De `cuDNN\include\*` → `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.0\include`
-
-#### Paso 7: Verificar que PyTorch detecta CUDA
+Escribe en la terminal lo siguiente, para comprobar que CUDA está disponible
 
 ```python
 python -c "import torch; print(torch.cuda.is_available())"
@@ -147,7 +96,17 @@ Debería mostrar `True`.
 
 ## 🚀 Uso
 
-Para ejecutar el procesador de video principal:
+El archivo principal es distances.py, que viene explicado en distances.ipynb. Los demás archivos son las dependencias que necesita distances.py para funcionar. Cada una viene explicada en su correspondiente Notebook.
 
+Por defecto está configurado para funcionar con un vídeo de prueba. Puedes ver el resultado ejecutando:
 ```bash
-python main.py --input data/video_entrada.mp4 --output results/resultado_final.mp4
+python distances.py --input display_elements/distance_prediction/videos/video1.mp4 --output results/resultado_final.mp4
+```
+
+Debes también copiar los archivos de la [carpeta de drive](https://drive.google.com/drive/folders/1GSkANsIEhRQM3dGJAGoPcmQ9cjh6t_2X?usp=drive_link) en tu proyecto.
+
+En caso de querer probar tu propio vídeo, se requiere una configuración inicial:
+1. Se debe calibrar la cámara que va a grabar los vídeos para obtener su distancia focal. 
+2. Se debe tomar una fotografía de un carril recto y llano, y determinar el trapecio que contiene el carril desde la perspectiva de dicha imagen (véase road_lines.ipynb para entender como hacerlo).
+
+Una vez que se consiguen esos dos parámetros, se pueden pasar como argumento a distances.py (véase --help).
