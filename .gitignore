@@ -8,3 +8,4 @@ documentos
 *.pt
 predictions_inicial.ipynb
 road_lines_canny.ipynb
+road_lines_canny.py 
