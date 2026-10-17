@@ -7,8 +7,9 @@ import sys
 import torch
 from torchvision.transforms import functional as F_torch
 
-from train import get_model_instance_segmentation
-from predictions import get_predictions, draw_predictions
+from src.detection.model import load_model
+from src.detection.inference import get_predictions
+from src.detection.draw import draw_predictions
 from road_lines_sobel import road_line_filter_image, calculate_road_lines, get_road_mask
 from road_lines_canny import image_edges
 
@@ -361,20 +362,11 @@ if __name__ == '__main__':
     print(f"Loading model from: {args.model}")
     print(f"Using device: {device}")
 
-    # Instantiate architecture
-    num_classes = 8 
-    model = get_model_instance_segmentation(num_classes)
-
-    # Load weights
     try:
-        data_model = torch.load(args.model, map_location=device, weights_only=False) # weights_only=False might be needed depending on torch version
-        model.load_state_dict(data_model['model_state_dict'])
+        model = load_model(args.model, device)
     except Exception as e:
         print(f"Error loading the model: {e}")
         sys.exit(1)
-
-    model.to(device)
-    model.eval()
 
     # 5. EXECUTE PROCESSING
     draw_lane_flag = not args.hide_lane # If hide-lane is True, draw is False
