@@ -53,3 +53,59 @@ def get_predictions(image_tensor, model, img_h, img_w, score_threshold=0.5, max_
         return full_masks, pred_boxes, pred_labels
 
     return pred_masks, pred_boxes, pred_labels
+
+
+class VehicleDetector:
+    """
+        Runs the model over a sequence of frames. It only predicts every 'frames_per_prediction' frames
+        (reusing the last predictions in between) and crops the sky: the model only evaluates the image
+        from a little above the highest vehicle found in the previous prediction.
+    """
+    RESET_MAX_HEIGHT = 25   # Each 25 frames, model predicts the whole image
+
+    def __init__(self, model, device, img_h, img_w, score_threshold=0.5, frames_per_prediction=1):
+        """
+        Args:
+            model: The segmentation model that predicts masks and bouding boxes
+            device: The device where the computations will be done
+            img_h, img_w: The dimensions of the frames
+            score_threshold: The asurance of the model for shwoing the instance predictions 
+            frames_per_prediction: The amount of frames that passes beetwen each prediction. Default is 1 (every frame)
+        """
+        if frames_per_prediction <= 0:
+            raise ValueError("Frames per predictions must be > 0")
+
+        self.model = model
+        self.device = device
+        self.img_h = img_h
+        self.img_w = img_w
+        self.score_threshold = score_threshold
+        self.frames_per_prediction = frames_per_prediction
+
+        self.prev_max_height = 0     # First process the whole image
+        self.frame_count = 0
+        self.last_predictions = None
+
+    def __call__(self, frame_tensor):
+        """ Return (masks, boxes, labels) for the given frame in Tensor format """
+        # Let between model predictions as many frames as frames_per_prediction
+        if self.frame_count % self.frames_per_prediction == 0:
+
+            # Each certain amount of frames, processes the whole image
+            if self.frame_count % self.RESET_MAX_HEIGHT == 0:
+                self.prev_max_height = 0
+
+            masks, boxes, labels = get_predictions(frame_tensor, self.model, 
+                                                   self.img_h, self.img_w, 
+                                                   self.score_threshold,
+                                                   self.prev_max_height
+                                                   )
+
+            # Update the maximum height reached by any bounding box (10% margin above it)
+            if len(boxes) > 0:
+                self.prev_max_height = int(torch.min(boxes[:, 1]).item()) - int(self.img_h*0.1)
+
+            self.last_predictions = (masks, boxes, labels)
+
+        self.frame_count += 1
+        return self.last_predictions
