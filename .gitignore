@@ -15,3 +15,4 @@ predictions_inicial.ipynb
 car-distance-prediction.zip
 links.txt
 .idea
+*.egg-info

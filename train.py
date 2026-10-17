@@ -4,8 +4,8 @@ import os
 import numpy as np
 import json
 
-import references.detection.utils as utils
-from references.detection.engine import train_one_epoch, evaluate
+import src.training.vendor.utils as utils
+from src.training.vendor.engine import train_one_epoch, evaluate
 
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
