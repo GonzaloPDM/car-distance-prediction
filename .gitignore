@@ -1,4 +1,5 @@
 datasets
+tutorial
 .venv
 __pycache__
 results
@@ -13,3 +14,4 @@ checkpoints
 predictions_inicial.ipynb
 car-distance-prediction.zip
 links.txt
+.idea

@@ -1,27 +1,27 @@
 # car-distance-prediction
 
-# 🚗 ADAS Prototype: Vehicle Segmentation, Lane Tracking & Distance Estimation
+# ADAS Prototype: Vehicle Segmentation, Lane Tracking & Distance Estimation
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue?style=for-the-badge&logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-Mask%20RCNN-red?style=for-the-badge&logo=pytorch&logoColor=white)
 ![OpenCV](https://img.shields.io/badge/OpenCV-Computer%20Vision-green?style=for-the-badge&logo=opencv&logoColor=white)
 ![Status](https://img.shields.io/badge/Status-Active-success?style=for-the-badge)
 
-## 📖 Descripción
+## Descripción
 
 Este proyecto es un prototipo de **Sistema Avanzado de Asistencia al Conductor (ADAS)** desarrollado en Python. Combina técnicas de **Deep Learning** y **Visión por Computador Clásica** para interpretar el entorno de conducción en tiempo real.
 
 El objetivo principal del sistema no es solo detectar vehículos, sino **calcular la distancia de seguridad** específicamente con los vehículos que se encuentran dentro del carril del conductor, filtrando el tráfico irrelevante de carriles adyacentes.
 
-## ✨ Características Principales
+## Características Principales
 
-* **🏎️ Segmentación de Instancias (Mask R-CNN):** Detección precisa de vehículos utilizando una red ResNet-50 FPN, **fine-tuneada con el dataset Cityscapes** para una mejor precisión urbana.
-* **🛣️ Detección de Carriles:** Algoritmo de visión clásica (Sobel/Canny + Sliding Windows) que genera una máscara binaria del carril actual.
-* **📏 Estimación de Distancia:** Cálculo de la distancia (en metros) utilizando el **modelo de cámara estenopeica (Pinhole Camera Model)**, basado en el ancho conocido de cada tipo de vehículo.
-* **🎯 Filtrado Inteligente (Data Association):** Lógica que cruza las máscaras de segmentación con la máscara del carril para medir la distancia *únicamente* a los vehículos relevantes.
-* **🚀 Optimización ROI (Sky Removal):** Optimización que descarta el procesamiento de la zona superior de la imagen (cielo/horizonte) para reducir la carga de la GPU y aumentar los FPS.
+* **Segmentación de Instancias (Mask R-CNN):** Detección precisa de vehículos utilizando una red ResNet-50 FPN, **fine-tuneada con el dataset Cityscapes** para una mejor precisión urbana.
+* **Detección de Carriles:** Algoritmo de visión clásica (Sobel/Canny + Sliding Windows) que genera una máscara binaria del carril actual.
+* **Estimación de Distancia:** Cálculo de la distancia (en metros) utilizando el **modelo de cámara estenopeica (Pinhole Camera Model)**, basado en el ancho conocido de cada tipo de vehículo.
+* **Filtrado Inteligente (Data Association):** Lógica que cruza las máscaras de segmentación con la máscara del carril para medir la distancia *únicamente* a los vehículos relevantes.
+* **Optimización ROI (Sky Removal):** Optimización que descarta el procesamiento de la zona superior de la imagen (cielo/horizonte) para reducir la carga de la GPU y aumentar los FPS.
 
-## 🧠 Pipeline de Procesamiento
+## Pipeline de Procesamiento
 
 El sistema procesa cada frame del video siguiendo este flujo:
 
@@ -43,7 +43,7 @@ El sistema procesa cada frame del video siguiendo este flujo:
     * Los vehículos fuera del carril se marcan en **Cyan**.
     * Los vehículos en trayectoria muestran su distancia y alerta de color.
 
-## 🛠️ Instalación
+## Instalación
 
 ### Requisitos previos
 * Python 3.8+
@@ -94,7 +94,7 @@ Debería mostrar `True`.
 
     
 
-## 🚀 Uso
+## Uso
 
 El archivo principal es distances.py, que viene explicado en distances.ipynb. Los demás archivos son las dependencias que necesita distances.py para funcionar. Cada una viene explicada en su correspondiente Notebook.
 

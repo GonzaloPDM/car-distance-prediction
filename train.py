@@ -198,7 +198,7 @@ if __name__ == "__main__":
     # train on the accelerator (or on the CPU if an accelerator is not available)
     device = torch.accelerator.current_accelerator() if torch.accelerator.is_available() else torch.device('cpu')
 
-    # A class for every type of considered is needed, aswell as background (7+1)
+    # A class for every considered kind of vehicle is needed, as well as background (7+1)
     num_classes = len(CITYSCAPES_ID_TO_MODEL_ID) + 1
 
     # Load dataset class
