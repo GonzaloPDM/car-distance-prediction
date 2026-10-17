@@ -10,8 +10,10 @@ from torchvision.transforms import functional as F_torch
 from src.detection.model import load_model
 from src.detection.inference import get_predictions
 from src.detection.draw import draw_predictions
-from road_lines_sobel import road_line_filter_image, calculate_road_lines, get_road_mask
-from road_lines_canny import image_edges
+from src.lanes.filters import filter_lane_pixels
+from src.lanes.perspective import get_homography, warp
+from src.lanes.fitting import calculate_road_lines
+from src.lanes.mask import get_road_mask
 
 VEHICLE_CONFIG = {
     1:  1.8,
@@ -108,8 +110,8 @@ def draw_predictions_in_lanes(image_tensor, pred_masks, pred_boxes, pred_labels,
 def predict_distance(image, M, Minv, img_h, img_w, model, 
                      device='cpu', score_threshold=0.5, draw_lane=False):
 
-    filter_image, _ = road_line_filter_image(image)
-    no_persp = cv2.warpPerspective(filter_image, M, (img_w, img_h), flags=cv2.INTER_LINEAR)
+    filter_image = filter_lane_pixels(image, 'sobel')
+    no_persp = warp(filter_image, M, img_h, img_w)
     left_fit, right_fit, _ = calculate_road_lines(no_persp)
 
     # Create lane mask
@@ -178,24 +180,8 @@ def process_distance_video(video_path, output_path, model, device='cpu', score_t
         
         print(f"Processing video... Resolution: {img_w}x{img_h}, FPS: {fps}")
 
-        if src_pts is None:
-            p1_top_left = (int(img_w * 0.45), int(img_h * 0.63)) 
-            p2_top_right = (int(img_w * 0.52), int(img_h * 0.63)) 
-            p3_bot_right = (int(img_w * 0.84), int(img_h * 0.99)) 
-            p4_bot_left  = (int(img_w * 0.28), int(img_h * 0.99)) 
-
-            src_pts = np.float32([p1_top_left, p2_top_right, p3_bot_right, p4_bot_left])
-
-        if dst_pts is None:
-            dst_pts = np.float32([(int(img_w*0.4), 0), 
-                                  (int(img_w*0.6), 0), 
-                                  (int(img_w*0.6), img_h), 
-                                  (int(img_w*0.4), img_h)
-                    ])
-            
         # Calculate homography
-        M = cv2.getPerspectiveTransform(src_pts, dst_pts)
-        Minv = np.linalg.inv(M)
+        M, Minv = get_homography(img_h, img_w, src_pts, dst_pts)
         
         frame_count = 0
         prev_max_height = 0     # First process the whole image
@@ -208,12 +194,8 @@ def process_distance_video(video_path, output_path, model, device='cpu', score_t
 
             # ------------ LANE MASK ------------------------
 
-            if mode=='sobel':
-                filter_frame, _ = road_line_filter_image(frame)
-            elif mode== 'canny':
-                filter_frame = image_edges(frame, lower_threshold=5, upper_threshold=250)
-                
-            no_perspective = cv2.warpPerspective(filter_frame, M, (img_w, img_h), flags=cv2.INTER_LINEAR)
+            filter_frame = filter_lane_pixels(frame, mode)
+            no_perspective = warp(filter_frame, M, img_h, img_w)
             left_fit, right_fit, _ = calculate_road_lines(no_perspective)
 
             # Create lane mask
