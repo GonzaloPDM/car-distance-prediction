@@ -1,18 +1,24 @@
-datasets
-tutorial
+# Python
 .venv
 __pycache__
-results
-documentos
-checkpoints
+*.egg-info
+
+# IDE
+.idea
+
+# Local data, weights and results
+data
+outputs
+model
+docs
+tutorial
+notebooks/archive
+car-distance-prediction.zip
+
+# Large media and weights
 *.mp4
 *.jpeg
 *.png
 *.jpg
 *.pth
 *.pt
-predictions_inicial.ipynb
-car-distance-prediction.zip
-links.txt
-.idea
-*.egg-info

@@ -11,7 +11,7 @@ from src.video import process_video
 
 if __name__ == "__main__":
     CWD = os.getcwd()
-    DEFAULT_MODEL_PATH = os.path.join(CWD, "final_model/maskrcnn_cityscapes.pth")
+    DEFAULT_MODEL_PATH = os.path.join(CWD, "weights/maskrcnn_cityscapes.pth")
 
     parser = argparse.ArgumentParser(description="Vehicle instance segmentation (Mask R-CNN)")
     parser.add_argument('--input', '-i', type=str, required=True, help="Path to the input video file")

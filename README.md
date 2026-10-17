@@ -62,7 +62,10 @@ El sistema procesa cada frame del video siguiendo este flujo:
     .\.venv\Scripts\activate  # En Windows
     # source .venv/bin/activate  # En Linux/macOS
     pip install -r requirements.txt
+    pip install -e .
     ```
+
+    `pip install -e .` instala el paquete `src` del proyecto, para que los scripts y los notebooks puedan importarlo desde cualquier carpeta.
 
     Si no tienes CUDA y no quieres instalarlo para optimizar la inferencia por GPU, instala también las siguientes dependencias:
 
@@ -94,19 +97,44 @@ Debería mostrar `True`.
 
     
 
+## Estructura del proyecto
+
+```
+src/                 Paquete con toda la lógica (sin rutas fijas)
+  lanes/             Detección de carril: filtros (sobel/canny), perspectiva, ajuste y máscara
+  detection/         Mask R-CNN: construcción/carga del modelo, inferencia y dibujo
+  distance/          Distancia por modelo estenopeico y asociación vehículo-carril
+  training/          Dataset Cityscapes y bucle de fine-tuning (vendor/ = scripts de torchvision)
+  pipeline.py        Une carriles + detección + distancia, para imagen o vídeo
+  video.py           Bucle genérico de lectura/escritura de vídeo
+scripts/             Puntos de entrada por línea de comandos
+notebooks/           Explicación paso a paso de cada parte (01 a 05)
+assets/              Imágenes y vídeos de ejemplo
+weights/             Pesos del modelo y checkpoints (no se suben a git)
+data/                Dataset Cityscapes (no se sube a git)
+outputs/             Resultados generados (no se suben a git)
+```
+
 ## Uso
 
-El archivo principal es distances.py, que viene explicado en distances.ipynb. Los demás archivos son las dependencias que necesita distances.py para funcionar. Cada una viene explicada en su correspondiente Notebook.
+El script principal es `scripts/run_distances.py`, explicado en `notebooks/05_distances.ipynb`. El resto de partes se explican en sus notebooks correspondientes. Ejecuta los scripts desde la raíz del proyecto.
+
+Debes copiar los archivos de la [carpeta de drive](https://drive.google.com/drive/folders/1GSkANsIEhRQM3dGJAGoPcmQ9cjh6t_2X?usp=drive_link) en tu proyecto (los pesos del modelo van en `weights/maskrcnn_cityscapes.pth`).
 
 Por defecto está configurado para funcionar con un vídeo de prueba. Puedes ver el resultado ejecutando:
 ```bash
-python distances.py --input display_elements/distance_prediction/videos/video1.mp4 --output results/resultado_final.mp4
+python scripts/run_distances.py --input assets/distance_prediction/videos/video1_1.mp4 --output outputs/resultado_final.mp4
 ```
 
-Debes también copiar los archivos de la [carpeta de drive](https://drive.google.com/drive/folders/1GSkANsIEhRQM3dGJAGoPcmQ9cjh6t_2X?usp=drive_link) en tu proyecto.
+Añade `--show` para ver el vídeo mientras se procesa. Otros scripts:
+```bash
+python scripts/run_lanes.py -i assets/road_segmentation/videos/video1_recortado.mp4 -o outputs/carril.mp4 --mode canny
+python scripts/run_segmentation.py -i assets/car_segmentation/videos/video1.mp4 -o outputs/segmentacion.mp4
+python scripts/train.py --data data/cityscape_data
+```
 
 En caso de querer probar tu propio vídeo, se requiere una configuración inicial:
 1. Se debe calibrar la cámara que va a grabar los vídeos para obtener su distancia focal. 
-2. Se debe tomar una fotografía de un carril recto y llano, y determinar el trapecio que contiene el carril desde la perspectiva de dicha imagen (véase road_lines.ipynb para entender como hacerlo).
+2. Se debe tomar una fotografía de un carril recto y llano, y determinar el trapecio que contiene el carril desde la perspectiva de dicha imagen (véase `notebooks/01_road_lines_sobel.ipynb` para entender como hacerlo).
 
-Una vez que se consiguen esos dos parámetros, se pueden pasar como argumento a distances.py (véase --help).
+Una vez que se consiguen esos dos parámetros, se pueden pasar como argumento a `scripts/run_distances.py` (véase `--help`).

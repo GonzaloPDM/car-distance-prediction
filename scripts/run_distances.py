@@ -15,7 +15,7 @@ if __name__ == '__main__':
 
     # Define default base paths
     CWD = os.getcwd()
-    DEFAULT_MODEL_PATH = os.path.join(CWD, "final_model/maskrcnn_cityscapes.pth")
+    DEFAULT_MODEL_PATH = os.path.join(CWD, "weights/maskrcnn_cityscapes.pth")
 
     # 1. ARGUMENT PARSER CONFIGURATION
     parser = argparse.ArgumentParser(description="ADAS Prototype: Distance Estimation & Lane Tracking")
@@ -26,7 +26,7 @@ if __name__ == '__main__':
 
     # Optional arguments
     parser.add_argument('--output', '-o', type=str, default=None,
-                        help="Path to save the result. If not provided, saves automatically to 'results/'")
+                        help="Path to save the result. If not provided, saves automatically to 'outputs/'")
 
     parser.add_argument('--model', '-m', type=str, default=DEFAULT_MODEL_PATH,
                         help="Path to the model weights .pth file")
@@ -74,7 +74,7 @@ if __name__ == '__main__':
     if args.output is None:
         filename = os.path.basename(args.input)
         name, ext = os.path.splitext(filename)
-        args.output = os.path.join(CWD, "results", f"{name}_result{ext}")
+        args.output = os.path.join(CWD, "outputs", f"{name}_result{ext}")
 
     # Ensure output directory exists
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
